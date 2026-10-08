@@ -1,0 +1,34 @@
+# Python & Virtual Environments
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+
+# Data & Downloads (ERA5 raw data, external datasets)
+data/raw/*
+!data/raw/.gitkeep
+data/external/*
+!data/external/.gitkeep
+
+# Heavy Run Results & Checkpoints
+results/checkpoints_*/
+results/eval_*/
+results/best_*/
+results/tensorboard/
+results/*.zip
+results/*.npz
+results/*.json
+!results/summary/
+
+# IDE & OS Garbage
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo

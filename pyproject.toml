@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drone_energy"
+version = "0.1.0"
+description = "Energy-aware drone flight RL with a temperature-dependent Thevenin battery model, wind zones and dynamic payload"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "gymnasium",
+    "stable-baselines3",
+    "matplotlib",
+]
+# gym-pybullet-drones is intentionally NOT listed here.
+# Install it separately from your local clone: pip install -e ../gym-pybullet-drones
+
+[tool.setuptools.packages.find]
+include = ["drone_energy*"]
