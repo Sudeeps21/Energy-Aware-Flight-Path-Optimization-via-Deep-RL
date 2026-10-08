@@ -16,15 +16,10 @@ data/raw/*
 data/external/*
 !data/external/.gitkeep
 
-# Heavy Run Results & Checkpoints
+# Heavy Intermediate Checkpoints & Tensorboard Logs
 results/checkpoints_*/
-results/eval_*/
-results/best_*/
 results/tensorboard/
-results/*.zip
-results/*.npz
-results/*.json
-!results/summary/
+results/eval_*/
 
 # IDE & OS Garbage
 .DS_Store

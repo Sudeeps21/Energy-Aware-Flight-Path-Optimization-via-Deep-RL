@@ -1,0 +1,6 @@
+{
+  "scenario": "windy",
+  "timesteps": 500000,
+  "seed": 42,
+  "model_path": "results/ppo_windy_s42.zip"
+}
