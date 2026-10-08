@@ -151,6 +151,30 @@ class WindZoneMap:
                         temperature_c=float(temp),
                     )
 
+    def load_card(self, card_or_id):
+        """Load wind and temperature zones dynamically from a ScenarioCard."""
+        from drone_energy.weather.cards import ScenarioCard
+        card = card_or_id if isinstance(card_or_id, ScenarioCard) else ScenarioCard.load(card_or_id)
+
+        nx, ny, nz = self.grid_shape
+        spd = card.mean_wind_speed_ms
+        ang = card.primary_wind_dir_rad
+        wx = spd * np.cos(ang)
+        wy = spd * np.sin(ang)
+
+        for ix in range(nx):
+            for iy in range(ny):
+                for iz in range(nz):
+                    shear_mult = 1.0 + iz * 0.15
+                    cell_wx = wx * shear_mult + self._rng.normal(0, card.std_wind_speed_ms * 0.2)
+                    cell_wy = wy * shear_mult + self._rng.normal(0, card.std_wind_speed_ms * 0.2)
+                    cell_wz = self._rng.normal(0, 0.05)
+                    cell_temp = card.mean_temperature_c - iz * 1.5 + self._rng.normal(0, 0.5)
+                    self._cells[ix][iy][iz] = ZoneCell(
+                        wind_vector=np.array([cell_wx, cell_wy, cell_wz], dtype=np.float32),
+                        temperature_c=float(cell_temp),
+                    )
+
     # ── Observation helper ─────────────────────────────────────────────────
 
     def get_local_obs(self, pos: np.ndarray) -> np.ndarray:
@@ -201,9 +225,7 @@ def make_scenario(
     seed: Optional[int] = None,
 ) -> WindZoneMap:
     """
-    Factory that returns a pre-configured WindZoneMap by scenario name.
-
-    Supported names: 'calm', 'windy', 'cold', 'random'
+    Factory that returns a pre-configured WindZoneMap by scenario name or card ID.
     """
     zone_map = WindZoneMap(grid_shape=grid_shape, world_size=world_size, seed=seed)
     loaders = {
@@ -212,7 +234,11 @@ def make_scenario(
         "cold"   : zone_map.load_cold,
         "random" : zone_map.load_random,
     }
-    if name not in loaders:
-        raise ValueError(f"Unknown scenario '{name}'. Choose from {list(loaders)}")
-    loaders[name]()
+    if name in loaders:
+        loaders[name]()
+    else:
+        try:
+            zone_map.load_card(name)
+        except Exception as e:
+            raise ValueError(f"Unknown scenario '{name}'. Choose from {list(loaders.keys())} or valid scenario cards. ({e})")
     return zone_map

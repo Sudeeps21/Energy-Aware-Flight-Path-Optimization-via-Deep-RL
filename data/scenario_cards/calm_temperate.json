@@ -1,0 +1,22 @@
+{
+  "scenario_id": "calm_temperate",
+  "name": "Calm Temperate Plateau (Bangalore Reference)",
+  "data_source": "Open-Meteo Historical ERA5 Reanalysis API (CC BY 4.0)",
+  "period": "2023-10-01 to 2023-11-30",
+  "coordinates": {
+    "lat": 12.97,
+    "lon": 77.59
+  },
+  "statistics": {
+    "mean_wind_speed_ms": 3.111,
+    "std_wind_speed_ms": 1.182,
+    "primary_wind_dir_rad": 1.436,
+    "gust_factor": 3.214,
+    "mean_temperature_c": 23.21,
+    "std_temperature_c": 3.52,
+    "mean_surface_pressure_hpa": 913.13,
+    "air_density_kg_m3": 1.0734,
+    "shear_exponent": 0.14,
+    "neighbour_contrast": 0.15
+  }
+}

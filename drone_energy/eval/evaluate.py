@@ -31,6 +31,7 @@ except ImportError:
 
 from drone_energy.envs.multi_factor_drone_env import MultiFactorDroneEnv
 from drone_energy.baselines.pid_baseline import WaypointPIDAgent
+from drone_energy.baselines.astar_cost_map import AStarEnergyAgent
 
 
 SCENARIOS = ["calm", "windy", "cold"]
@@ -57,7 +58,7 @@ def run_episodes(
         env  = MultiFactorDroneEnv(scenario=scenario, seed=seed_start + ep)
         obs, _ = env.reset(seed=seed_start + ep)
 
-        if agent_type == "pid":
+        if agent_type in ["pid", "astar"]:
             agent.reset()
 
         done       = False
@@ -133,9 +134,21 @@ def evaluate(
         all_records.extend(pid_records)
 
         pid_summary = summarise(pid_records)
-        print(f"  PID  | energy={pid_summary.get('total_energy_wh_mean', 0):.4f} Wh "
+        print(f"  PID     | energy={pid_summary.get('total_energy_wh_mean', 0):.4f} Wh "
               f"| success={pid_summary.get('mission_complete_mean', 0)*100:.1f}% "
               f"| reward={pid_summary.get('total_reward_mean', 0):.1f}")
+
+        # ── A* Energy baseline (B1) ──────────────────────────────────
+        astar_agent = AStarEnergyAgent()
+        astar_records = run_episodes(
+            astar_agent, scenario, n_episodes, seed_start, agent_type="astar"
+        )
+        all_records.extend(astar_records)
+
+        astar_summary = summarise(astar_records)
+        print(f"  A* (B1) | energy={astar_summary.get('total_energy_wh_mean', 0):.4f} Wh "
+              f"| success={astar_summary.get('mission_complete_mean', 0)*100:.1f}% "
+              f"| reward={astar_summary.get('total_reward_mean', 0):.1f}")
 
         # ── PPO agent ─────────────────────────────────────────────────
         model_path = os.path.join(model_dir, f"ppo_{scenario}_s42.zip")
@@ -149,7 +162,7 @@ def evaluate(
             )
             all_records.extend(ppo_records)
             ppo_summary = summarise(ppo_records)
-            print(f"  PPO  | energy={ppo_summary.get('total_energy_wh_mean', 0):.4f} Wh "
+            print(f"  PPO     | energy={ppo_summary.get('total_energy_wh_mean', 0):.4f} Wh "
                   f"| success={ppo_summary.get('mission_complete_mean', 0)*100:.1f}% "
                   f"| reward={ppo_summary.get('total_reward_mean', 0):.1f}")
         else:
@@ -159,8 +172,9 @@ def evaluate(
                 print(f"  PPO model not found at {model_path}. Train first with train_ppo.py")
 
         results_by_scenario[scenario] = {
-            "pid"  : pid_summary,
-            "ppo"  : ppo_summary,
+            "pid"   : pid_summary,
+            "astar" : astar_summary,
+            "ppo"   : ppo_summary,
         }
 
     # ── Save results ──────────────────────────────────────────────────────

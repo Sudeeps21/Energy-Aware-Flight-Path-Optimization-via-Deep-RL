@@ -1,0 +1,22 @@
+{
+  "scenario_id": "cold_winter",
+  "name": "Cold Altitude Winter Region (Leh/Ladakh)",
+  "data_source": "Open-Meteo Historical ERA5 Reanalysis API (CC BY 4.0)",
+  "period": "2023-12-01 to 2024-02-29",
+  "coordinates": {
+    "lat": 34.15,
+    "lon": 77.57
+  },
+  "statistics": {
+    "mean_wind_speed_ms": 1.806,
+    "std_wind_speed_ms": 0.868,
+    "primary_wind_dir_rad": 0.169,
+    "gust_factor": 5.09,
+    "mean_temperature_c": -5.44,
+    "std_temperature_c": 4.58,
+    "mean_surface_pressure_hpa": 675.22,
+    "air_density_kg_m3": 0.8787,
+    "shear_exponent": 0.14,
+    "neighbour_contrast": 0.15
+  }
+}
