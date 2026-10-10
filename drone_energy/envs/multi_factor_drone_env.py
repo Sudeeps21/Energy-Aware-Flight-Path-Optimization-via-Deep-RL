@@ -58,6 +58,12 @@ MAX_SPEED   = 10.0                                               # m/s clamp
 MAX_THRUST  = 30.0                                               # N total (4 rotors)
 PAYLOAD_MASS_DEFAULT = 0.3                                       # kg at pickup
 
+# Episode randomisation ranges (for genuine per-episode variance)
+_SoC_RANGE          = (0.7, 1.0)     # starting state of charge
+_PAYLOAD_RANGE      = (0.2, 0.5)     # kg picked up at waypoint 0
+_START_POS_JITTER   = 0.5            # ± metres around nominal start (2, 2, 1)
+_WP_JITTER          = 1.0            # ± metres on each waypoint (xy only)
+
 
 class MultiFactorDroneEnv(gym.Env):
     """
@@ -132,13 +138,16 @@ class MultiFactorDroneEnv(gym.Env):
             dtype=np.float32,
         )
 
-        # ── Mission waypoints ─────────────────────────────────────────────
-        # Waypoint 0 = pickup point, Waypoint 1 = delivery, Waypoint 2 = home
+        # ── Mission waypoints template (randomised per episode in reset) ────
+        # Waypoint 0 = pickup, Waypoint 1 = delivery, Waypoint 2 = home
         self._waypoints_template = np.array([
-            [15.0, 5.0,  3.0],   # pickup
-            [15.0, 15.0, 3.0],   # delivery
-            [2.0,  2.0,  1.0],   # home / landing
+            [15.0, 5.0,  3.0],   # pickup  (nominal)
+            [15.0, 15.0, 3.0],   # delivery (nominal)
+            [2.0,  2.0,  1.0],   # home / landing (nominal)
         ], dtype=np.float32)
+
+        # Active per-episode waypoints (set in reset())
+        self._waypoints: np.ndarray = self._waypoints_template.copy()
 
         # ── Internal state (initialised in reset) ─────────────────────────
         self._pos:          np.ndarray = np.zeros(3)
@@ -148,8 +157,11 @@ class MultiFactorDroneEnv(gym.Env):
         self._step_count:   int = 0
         self._waypoint_idx: int = 0
         self._payload:      float = 0.0
+        self._payload_mass_episode: float = PAYLOAD_MASS_DEFAULT
         self._prev_action:  np.ndarray = np.zeros(3)
         self._total_energy_wh: float = 0.0
+        self._path_length_m: float = 0.0
+        self._start_soc:    float = 1.0
         self._mission_complete: bool = False
         self._rng = np.random.default_rng(seed)
 
@@ -167,7 +179,38 @@ class MultiFactorDroneEnv(gym.Env):
         if seed is not None:
             self._rng = np.random.default_rng(seed)
 
-        # Rebuild zone map
+        # ── 1. Randomise episode waypoints (genuine per-episode variance) ─
+        jitter = self._rng.uniform(-_WP_JITTER, _WP_JITTER, size=(3, 3)).astype(np.float32)
+        jitter[:, 2] *= 0.2   # very small z-jitter to stay near trained altitude
+        self._waypoints = np.clip(
+            self._waypoints_template + jitter,
+            [1.0, 1.0, 1.5],   # min bounds
+            [WORLD_SIZE[0] - 1.0, WORLD_SIZE[1] - 1.0, WORLD_SIZE[2] - 1.0],
+        ).astype(np.float32)
+
+        # ── 2. Randomise payload mass ─────────────────────────────────────
+        self._payload_mass_episode = float(
+            self._rng.uniform(_PAYLOAD_RANGE[0], _PAYLOAD_RANGE[1])
+        )
+
+        # ── 3. Randomise start SoC ────────────────────────────────────────
+        self._start_soc = float(
+            self._rng.uniform(_SoC_RANGE[0], _SoC_RANGE[1])
+        )
+
+        # ── 4. Randomise start position (small jitter around nominal) ─────
+        pos_jitter = self._rng.uniform(
+            -_START_POS_JITTER, _START_POS_JITTER, size=3
+        ).astype(np.float32)
+        pos_jitter[2] = 0.0   # keep nominal altitude at start
+        self._pos = np.clip(
+            np.array([2.0, 2.0, 1.0], dtype=np.float32) + pos_jitter,
+            [0.5, 0.5, 0.5],
+            [5.0, 5.0, 2.0],
+        ).astype(np.float32)
+        self._vel = np.zeros(3, dtype=np.float32)
+
+        # ── 5. Rebuild zone map (new weather realisation each episode) ────
         scenario = "random" if self.randomise_scenario else self.scenario
         self._zone_map = make_scenario(
             scenario,
@@ -176,22 +219,21 @@ class MultiFactorDroneEnv(gym.Env):
             seed=int(self._rng.integers(0, 2**31)),
         )
 
-        # Initial position — drone starts near origin
-        self._pos = np.array([2.0, 2.0, 1.0], dtype=np.float32)
-        self._vel = np.zeros(3, dtype=np.float32)
+        # Get starting cell temperature; initialise battery at episode SoC
+        cell = self._zone_map.get_cell(self._pos)
+        self._battery = BatteryState(
+            self.drone, cell.temperature_c, initial_soc=self._start_soc
+        )
 
-        # Get starting cell temperature for battery initialisation
-        cell      = self._zone_map.get_cell(self._pos)
-        self._battery = BatteryState(self.drone, cell.temperature_c)
-
-        self._step_count    = 0
-        self._waypoint_idx  = 0
-        self._payload       = 0.0          # must pick up at waypoint 0
-        self._prev_action   = np.zeros(3, dtype=np.float32)
-        self._total_energy_wh = 0.0
+        self._step_count       = 0
+        self._waypoint_idx     = 0
+        self._payload          = 0.0   # picked up at waypoint 0
+        self._prev_action      = np.zeros(3, dtype=np.float32)
+        self._total_energy_wh  = 0.0
+        self._path_length_m    = 0.0
         self._mission_complete = False
 
-        obs = self._get_obs()
+        obs  = self._get_obs()
         info = self._get_info()
         return obs, info
 
@@ -203,6 +245,7 @@ class MultiFactorDroneEnv(gym.Env):
 
         action = np.clip(action, -1.0, 1.0).astype(np.float32)
         self._step_count += 1
+        prev_pos = self._pos.copy()
 
         # ── 1. Physics ────────────────────────────────────────────────────
         current_mass = self.drone.mass + self._payload
@@ -226,6 +269,9 @@ class MultiFactorDroneEnv(gym.Env):
         self._vel  = np.clip(self._vel, -MAX_SPEED, MAX_SPEED)
         self._pos += self._vel * DT
 
+        # Accumulate path length for Wh/km fairness metric
+        self._path_length_m += float(np.linalg.norm(self._pos - prev_pos))
+
         # ── 2. Energy draw ────────────────────────────────────────────────
         power = flight_power(
             drone=self.drone,
@@ -244,8 +290,8 @@ class MultiFactorDroneEnv(gym.Env):
         terminated     = False
         truncated      = False
 
-        if self._waypoint_idx < len(self._waypoints_template):
-            wp_target = self._waypoints_template[self._waypoint_idx]
+        if self._waypoint_idx < len(self._waypoints):
+            wp_target = self._waypoints[self._waypoint_idx]
             dist      = float(np.linalg.norm(self._pos - wp_target))
 
             if dist < 1.0:    # within 1 m — waypoint reached
@@ -254,7 +300,7 @@ class MultiFactorDroneEnv(gym.Env):
 
                 # Waypoint 0 = pickup
                 if self._waypoint_idx == 0:
-                    self._payload = self.payload_mass_init
+                    self._payload = self._payload_mass_episode
 
                 # Waypoint 1 = delivery (drop payload)
                 elif self._waypoint_idx == 1:
@@ -291,8 +337,8 @@ class MultiFactorDroneEnv(gym.Env):
         reward -= 0.1                  # time penalty
 
         # Shaping: small reward for moving toward next waypoint
-        if self._waypoint_idx < len(self._waypoints_template) and not waypoint_hit:
-            wp_target = self._waypoints_template[self._waypoint_idx]
+        if self._waypoint_idx < len(self._waypoints) and not waypoint_hit:
+            wp_target = self._waypoints[self._waypoint_idx]
             new_dist  = float(np.linalg.norm(self._pos - wp_target))
             old_dist  = float(np.linalg.norm(
                 (self._pos - self._vel * DT) - wp_target
@@ -305,17 +351,27 @@ class MultiFactorDroneEnv(gym.Env):
         info = self._get_info()
 
         if terminated or truncated:
+            path_km = max(self._path_length_m / 1000.0, 1e-9)
+            energy_per_km = self._total_energy_wh / path_km
+            mean_speed = self._path_length_m / max(self._step_count * DT, 1e-9)
             info.update({
                 "total_energy_wh"  : self._total_energy_wh,
                 "mission_complete" : self._mission_complete,
                 "waypoints_reached": self._waypoint_idx,
                 "steps"            : self._step_count,
                 "final_soc"        : self._battery.state_of_charge,
+                "path_length_m"    : self._path_length_m,
+                "energy_per_km"    : energy_per_km,
+                "mean_speed_ms"    : mean_speed,
+                "payload_mass_kg"  : self._payload_mass_episode,
+                "start_soc"        : self._start_soc,
             })
             self.episode_stats = {
                 k: v for k, v in info.items()
                 if k in ("total_energy_wh", "mission_complete",
-                         "waypoints_reached", "steps", "final_soc")
+                         "waypoints_reached", "steps", "final_soc",
+                         "path_length_m", "energy_per_km", "mean_speed_ms",
+                         "payload_mass_kg", "start_soc")
             }
 
         return obs, reward, terminated, truncated, info
@@ -326,8 +382,8 @@ class MultiFactorDroneEnv(gym.Env):
         cell = self._zone_map.get_cell(self._pos)
 
         # Next waypoint
-        if self._waypoint_idx < len(self._waypoints_template):
-            wp     = self._waypoints_template[self._waypoint_idx]
+        if self._waypoint_idx < len(self._waypoints):
+            wp     = self._waypoints[self._waypoint_idx]
             wp_vec = wp - self._pos
             wp_dist = np.linalg.norm(wp_vec)
             wp_norm = wp_vec / (wp_dist + 1e-6)

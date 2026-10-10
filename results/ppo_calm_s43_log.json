@@ -1,0 +1,6 @@
+{
+  "scenario": "calm",
+  "timesteps": 500000,
+  "seed": 43,
+  "model_path": "results/ppo_calm_s43.zip"
+}

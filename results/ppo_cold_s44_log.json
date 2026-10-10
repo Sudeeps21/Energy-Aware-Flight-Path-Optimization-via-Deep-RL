@@ -1,0 +1,6 @@
+{
+  "scenario": "cold",
+  "timesteps": 500000,
+  "seed": 44,
+  "model_path": "results/ppo_cold_s44.zip"
+}

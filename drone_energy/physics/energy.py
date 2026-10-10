@@ -199,9 +199,9 @@ class BatteryState:
         handle_crash()
     """
 
-    def __init__(self, drone: DroneParams, temperature_c: float):
+    def __init__(self, drone: DroneParams, temperature_c: float, initial_soc: float = 1.0):
         self.capacity_wh  = available_energy_wh(drone, temperature_c)
-        self.remaining_wh = self.capacity_wh
+        self.remaining_wh = self.capacity_wh * float(np.clip(initial_soc, 0.0, 1.0))
 
     def consume(self, power_watts: float, dt_s: float) -> float:
         """Deduct energy used over dt_s seconds. Returns energy consumed (Wh)."""
